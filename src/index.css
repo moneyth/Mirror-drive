@@ -1,0 +1,56 @@
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,600;0,700;1,700&family=Press+Start+2P&family=Share+Tech+Mono&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-arcade: "Press Start 2P", "Courier New", monospace;
+  --font-tech: "Share Tech Mono", monospace;
+  --font-chakra: "Chakra Petch", sans-serif;
+}
+
+/* Custom retro glows & CRT screen effect overlays */
+.shadow-glow {
+  box-shadow: 0 0 15px rgba(56, 189, 248, 0.45);
+}
+
+/* Deactivate touch context-menus, system callouts, sharing, copying, and user selections on interactive items */
+button, canvas, img, .select-none {
+  -webkit-touch-callout: none !important; /* iOS Safari */
+  -webkit-user-select: none !important;   /* Safari */
+   -khtml-user-select: none !important;   /* Konqueror HTML */
+     -moz-user-select: none !important;   /* Firefox */
+      -ms-user-select: none !important;   /* Internet Explorer/Edge */
+          user-select: none !important;   /* Non-prefixed version */
+  touch-action: manipulation !important;  /* Disable double-tap/pinch-zoom delays */
+}
+
+.text-neon-cyan {
+  text-shadow: 0 0 6px rgba(56, 189, 248, 0.8), 0 0 14px rgba(56, 189, 248, 0.3);
+}
+
+.text-neon-pink {
+  text-shadow: 0 0 6px rgba(244, 63, 94, 0.85), 0 0 14px rgba(244, 63, 94, 0.3);
+}
+
+/* Custom font aliases inside index.css */
+.font-arcade {
+  font-family: var(--font-arcade);
+}
+
+.font-tech {
+  font-family: var(--font-tech);
+}
+
+.font-chakra {
+  font-family: var(--font-chakra);
+}
+
+/* Global viewport normalization to eliminate address-bar overflow and unstyled black canvas frame leakage */
+html, body {
+  background-color: #f1f5f9; /* Aligns with slate-100 to make margins and notch borders look pristine */
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+}
+

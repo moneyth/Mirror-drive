@@ -1,0 +1,39 @@
+{
+  "entities": {
+    "UserProgress": {
+      "title": "User Progressive Game State",
+      "description": "Stores user's unlocked levels, best level times, and client settings.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Unique identifier for the user matching their Firebase Auth UID."
+        },
+        "unlockedLevels": {
+          "type": "array",
+          "description": "List of level numbers that the user has unlocked."
+        },
+        "levelBestTimes": {
+          "type": "object",
+          "description": "Key-value pair of level numbers/IDs to best completion time in seconds."
+        },
+        "settings": {
+          "type": "object",
+          "description": "User specific configuration such as audio preferences."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The timestamp when progress was last updated."
+        }
+      },
+      "required": ["userId", "unlockedLevels", "levelBestTimes", "settings", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "UserProgress",
+      "description": "User profile containing game achievements and settings."
+    }
+  }
+}

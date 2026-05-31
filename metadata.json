@@ -1,0 +1,6 @@
+{
+  "name": "Mirror Drive",
+  "description": "A split-screen retro pixel-art arcade driving game where you steer white and black Porsche GT3RS sports cars across mirrored tracks.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

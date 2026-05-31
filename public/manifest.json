@@ -1,0 +1,23 @@
+{
+  "short_name": "Mirror Drive",
+  "name": "Mirror Drive - Retro Split-Screen Driving Arcade",
+  "icons": [
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0f172a",
+  "theme_color": "#f43f5e",
+  "display": "standalone",
+  "orientation": "landscape"
+}
