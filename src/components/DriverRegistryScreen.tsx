@@ -5,42 +5,113 @@
 
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { Star, Shield, Cpu, Sparkles } from 'lucide-react';
+import { Shield, Cpu, Sparkles, UserPlus, LogIn, Loader2 } from 'lucide-react';
 import audioEngine from './AudioEngine';
+import { isFirebaseEnabled, checkUsernameInFirestore, saveProgressToFirebase } from '../firebase';
 
 interface DriverRegistryScreenProps {
-  onRegister: (name: string) => void;
+  onRegister: (
+    name: string,
+    userId: string,
+    unlockedLevels: number[],
+    levelBestTimes: Record<string, number>
+  ) => void;
 }
 
 export default function DriverRegistryScreen({ onRegister }: DriverRegistryScreenProps) {
   const [name, setName] = useState('');
   const [error, setError] = useState('');
+  const [isLoginTab, setIsLoginTab] = useState(false); // false: Create Account, true: Log In
+  const [isLoading, setIsLoading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
+    setStatusMessage('');
     
-    const trimmed = name.trim().toUpperCase();
-    if (trimmed.length < 2) {
+    const trimmed = name.trim();
+    const uppercaseName = trimmed.toUpperCase();
+
+    if (uppercaseName.length < 2) {
       setError('CALLSIGN MUST BE AT LEAST 2 CHARACTERS');
       audioEngine.playClick();
       return;
     }
     
-    if (trimmed.length > 12) {
+    if (uppercaseName.length > 12) {
       setError('CALLSIGN MUST BE 12 CHARACTERS OR LESS');
       audioEngine.playClick();
       return;
     }
 
-    if (!/^[A-Z0-9.\-_ ]+$/.test(trimmed)) {
+    if (!/^[A-Z0-9.\-_ ]+$/.test(uppercaseName)) {
       setError('ALPHANUMERIC CHARACTERS ONLY, SOLDIER');
       audioEngine.playClick();
       return;
     }
 
     audioEngine.playClick();
-    audioEngine.playSuccess(); // play arpeggio fanfare in greeting!
-    onRegister(trimmed);
+
+    if (!isFirebaseEnabled) {
+      // Local fallback if Firebase is offline
+      audioEngine.playSuccess();
+      onRegister(uppercaseName, `local_${uppercaseName.toLowerCase()}`, [1], {});
+      return;
+    }
+
+    setIsLoading(true);
+    setStatusMessage('ESTABLISHING SECURE VAULT CONNECTION...');
+
+    try {
+      const checkResult = await checkUsernameInFirestore(uppercaseName);
+      
+      if (isLoginTab) {
+        // --- LOG IN FLOW ---
+        if (checkResult && checkResult.exists && checkResult.data) {
+          setStatusMessage('🟢 CALLSIGN VERIFIED. SYNCHRONIZING TELEMETRY...');
+          audioEngine.playSuccess();
+          setTimeout(() => {
+            onRegister(
+              checkResult.data.playerName || uppercaseName,
+              checkResult.data.userId || uppercaseName.toLowerCase(),
+              checkResult.data.unlockedLevels || [1],
+              checkResult.data.levelBestTimes || {}
+            );
+          }, 1000);
+        } else {
+          setIsLoading(false);
+          setStatusMessage('');
+          setError('CALLSIGN NOT FOUND. PLEASE REGISTER A NEW COGNITIVE DRIVE.');
+        }
+      } else {
+        // --- CREATE ACCOUNT FLOW ---
+        if (checkResult && checkResult.exists) {
+          setIsLoading(false);
+          setStatusMessage('');
+          setError('Username already taken, please choose a different name');
+        } else {
+          setStatusMessage('Username available, creating new account...');
+          audioEngine.playSuccess();
+          
+          const defaultUnlocked = [1];
+          const defaultTimes = {};
+          const lowerId = uppercaseName.toLowerCase();
+          
+          // Save initially to Firebase
+          await saveProgressToFirebase(lowerId, defaultUnlocked, defaultTimes, false);
+          
+          setTimeout(() => {
+            onRegister(uppercaseName, lowerId, defaultUnlocked, defaultTimes);
+          }, 1200);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      setIsLoading(false);
+      setStatusMessage('');
+      setError('FIREWALL PROTECTION ACTIVE. RETRY ENTRANCE SEQUENCE.');
+    }
   };
 
   return (
@@ -55,82 +126,135 @@ export default function DriverRegistryScreen({ onRegister }: DriverRegistryScree
         initial={{ opacity: 0, scale: 0.92, y: 15 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        className="relative w-full max-w-[460px] bg-slate-900 border-4 border-sky-500 rounded-2xl p-6 md:p-8 shadow-[0_0_30px_rgba(14,165,233,0.3)] z-10 text-center flex flex-col gap-6"
+        className="relative w-full max-w-[460px] bg-slate-900 border-4 border-sky-500 rounded-2xl p-6 md:p-8 shadow-[0_0_30px_rgba(14,165,233,0.3)] z-10 text-center flex flex-col gap-5"
       >
-        <div className="flex flex-col items-center gap-1.5 border-b border-sky-500/20 pb-4">
-          <div className="relative mb-2">
+        <div className="flex flex-col items-center gap-1 border-b border-sky-500/20 pb-3">
+          <div className="relative mb-1">
             <div className="absolute inset-0 rounded-full bg-sky-500/10 blur animate-pulse" />
-            <div className="w-12 h-12 rounded-xl bg-sky-500/20 border border-sky-400 flex items-center justify-center text-sky-400">
-              <Cpu className="w-6 h-6 animate-pulse" />
+            <div className="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-400 flex items-center justify-center text-sky-400">
+              <Cpu className="w-5 h-5 animate-pulse" />
             </div>
           </div>
           
-          <h1 className="text-xl font-black tracking-widest text-sky-400 uppercase italic font-sans dark:drop-shadow-[0_2px_8px_rgba(56,189,248,0.4)]">
-            DRIVER REGISTRATION
+          <h1 className="text-lg font-black tracking-widest text-sky-400 uppercase italic font-sans dark:drop-shadow-[0_2px_8px_rgba(56,189,248,0.4)]">
+            DRIVER SECURE PORTAL
           </h1>
-          <p className="text-[10px] text-slate-400 uppercase tracking-widest leading-relaxed">
-            INPUT CALLSIGN TO CALIBRATE COGNITIVE DRIVE
+          <p className="text-[9px] text-slate-400 uppercase tracking-widest leading-relaxed">
+            CALIBRATE NEURAL INTERFACES TO ENTRANCE CHANNEL
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4 text-left">
+        {/* Tab Selection */}
+        <div className="grid grid-cols-2 gap-2 p-1 bg-slate-950 border border-sky-500/30 rounded-lg">
+          <button
+            type="button"
+            disabled={isLoading}
+            onClick={() => {
+              audioEngine.playClick();
+              setIsLoginTab(false);
+              setError('');
+              setStatusMessage('');
+            }}
+            className={`flex items-center justify-center gap-1.5 py-2 rounded text-[10px] font-black uppercase transition-all tracking-wider cursor-pointer ${
+              !isLoginTab
+                ? 'bg-sky-500 text-slate-950 shadow-md font-bold scale-102'
+                : 'text-sky-400 hover:bg-sky-500/10 opacity-70'
+            }`}
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>CREATE PROFILE</span>
+          </button>
+          
+          <button
+            type="button"
+            disabled={isLoading}
+            onClick={() => {
+              audioEngine.playClick();
+              setIsLoginTab(true);
+              setError('');
+              setStatusMessage('');
+            }}
+            className={`flex items-center justify-center gap-1.5 py-2 rounded text-[10px] font-black uppercase transition-all tracking-wider cursor-pointer ${
+              isLoginTab
+                ? 'bg-sky-500 text-slate-950 shadow-md font-bold scale-102'
+                : 'text-sky-400 hover:bg-sky-500/10 opacity-70'
+            }`}
+          >
+            <LogIn className="w-3.5 h-3.5" />
+            <span>ACCESS PROFILE</span>
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-3 text-left">
           <div className="flex flex-col gap-1.5">
-            <label className="text-[10px] text-sky-500/90 font-extrabold pb-0.5 uppercase tracking-widest">
-              PILOT CALLSIGN
+            <label className="text-[9px] text-sky-500/90 font-extrabold pb-0.5 uppercase tracking-widest">
+              {isLoginTab ? 'ENTER SECURE CALLSIGN' : 'PROPOSE PLAYER CALLSIGN'}
             </label>
             <div className="relative">
               <input
                 type="text"
                 autoFocus
+                disabled={isLoading}
                 maxLength={12}
                 value={name}
                 onChange={(e) => {
-                  setName(e.target.value.toUpperCase());
+                  setName(e.target.value);
                   setError('');
                 }}
                 placeholder="E.G. GIGARIDER"
-                className="w-full bg-slate-950 border-2 border-sky-500/40 focus:border-sky-400 focus:ring-1 focus:ring-sky-400 text-sky-200 text-center font-bold font-mono py-3.5 px-4 rounded text-base uppercase tracking-widest focus:outline-none selection:bg-sky-500/30 shadow-inner"
+                className="w-full bg-slate-950 border-2 border-sky-500/40 focus:border-sky-400 focus:ring-1 focus:ring-sky-400 text-sky-200 text-center font-bold font-mono py-3 px-4 rounded text-base uppercase tracking-widest focus:outline-none selection:bg-sky-500/30 shadow-inner disabled:opacity-50"
               />
               <div className="absolute top-1/2 -translate-y-1/2 right-3 pointer-events-none">
-                <Sparkles className="w-4 h-4 text-sky-550 opacity-40" />
+                <Sparkles className="w-3.5 h-3.5 text-sky-500 opacity-40" />
               </div>
             </div>
             
-            <div className="flex justify-between text-[8.5px] font-bold text-slate-500 uppercase tracking-wider pt-0.5 px-1">
-              <span>ALPHANUMERIC ONLY</span>
+            <div className="flex justify-between text-[8px] font-bold text-slate-500 uppercase tracking-wider pt-0.5 px-0.5">
+              <span>CASE-INSENSITIVE DUPLICATION BARRIER</span>
               <span className={name.length >= 10 ? 'text-amber-500' : ''}>
                 {name.length} / 12 CHARS
               </span>
             </div>
           </div>
 
-          <div className="min-h-5 flex items-center justify-center">
+          {/* Error and Status Display */}
+          <div className="min-h-12 flex flex-col items-center justify-center gap-1.5">
             {error && (
               <motion.span
                 initial={{ opacity: 0, y: -2 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="text-rose-400 text-[9.5px] font-bold uppercase tracking-wider border border-rose-500/20 bg-rose-950/20 py-1 px-3 rounded w-full text-center"
+                className="text-rose-400 text-[9px] font-bold uppercase tracking-wider border border-rose-500/20 bg-rose-950/20 py-1.5 px-3 rounded w-full text-center"
               >
                 ⚠️ {error}
               </motion.span>
+            )}
+            {statusMessage && (
+              <motion.div
+                initial={{ opacity: 0, y: -2 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="text-cyan-400 text-[9px] font-bold uppercase tracking-wider border border-cyan-500/20 bg-cyan-950/20 py-1.5 px-3 rounded w-full text-center flex items-center justify-center gap-1.5"
+              >
+                <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
+                <span>{statusMessage}</span>
+              </motion.div>
             )}
           </div>
 
           <button
             type="submit"
-            disabled={name.trim().length < 2}
-            className={`w-full font-sans font-black uppercase text-xs py-3.5 rounded transition-all tracking-wider flex items-center justify-center gap-2 border-2 cursor-pointer ${
-              name.trim().length >= 2 
+            disabled={name.trim().length < 2 || isLoading}
+            className={`w-full font-sans font-black uppercase text-xs py-3 rounded transition-all tracking-wider flex items-center justify-center gap-2 border-2 cursor-pointer ${
+              name.trim().length >= 2 && !isLoading
                 ? 'bg-sky-500 hover:bg-sky-400 text-slate-950 border-sky-300 hover:border-sky-400 shadow-[0_0_15px_rgba(14,165,233,0.35)] active:scale-95' 
                 : 'bg-slate-800 text-slate-500 border-slate-750 opacity-50 cursor-not-allowed'
             }`}
           >
-            <span>INITIALIZE COGNIZANCE</span>
+            <span>{isLoginTab ? 'ACCESS CLOUD CORE' : 'INITIALIZE REGISTRATION'}</span>
           </button>
         </form>
 
-        <div className="border-t border-sky-500/10 pt-4 text-center">
-          <p className="text-[8px] text-slate-500 tracking-widest uppercase font-bold max-w-[280px] mx-auto leading-normal">
+        <div className="border-t border-sky-500/10 pt-3 text-center">
+          <p className="text-[7.5px] text-slate-500 tracking-widest uppercase font-bold max-w-[300px] mx-auto leading-relaxed">
             * Speed Vault leaderboards track high score indexes across all 30 Mirror sectors automatically.
           </p>
         </div>

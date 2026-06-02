@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { LEVELS, WORLDS } from './Levels';
-import { ArrowLeft, Lock, Star, Zap, Volume2, Music, Check, Trophy, Crown, Award } from 'lucide-react';
+import { ArrowLeft, Lock, Star, Zap, Volume2, Music, Check, Trophy, Crown, Award, LogOut, Trash2 } from 'lucide-react';
 import audioEngine from './AudioEngine';
 import { User } from 'firebase/auth';
 import { motion, AnimatePresence } from 'motion/react';
@@ -24,6 +24,9 @@ interface LevelSelectScreenProps {
   isSyncing: boolean;
   playerName: string;
   onUpdatePlayerName: (newName: string) => void;
+  onSyncLeaderboards?: () => Promise<void>;
+  onLogout?: () => void;
+  onDeleteAccount?: () => Promise<void>;
 }
 
 export default function LevelSelectScreen({
@@ -38,7 +41,10 @@ export default function LevelSelectScreen({
   isFirebaseEnabled,
   isSyncing,
   playerName,
-  onUpdatePlayerName
+  onUpdatePlayerName,
+  onSyncLeaderboards,
+  onLogout,
+  onDeleteAccount
 }: LevelSelectScreenProps) {
   // Find highest unlocked level that does not have a completion time yet (newly unlocked)
   const newlyUnlockedId = useMemo(() => {
@@ -256,47 +262,50 @@ export default function LevelSelectScreen({
 
           <div className="flex items-center gap-2">
             {isFirebaseEnabled && (
-              <div className="flex items-center bg-white px-2.5 py-0.5 rounded border border-slate-200 shadow-sm text-xs">
+              <div className="flex items-center bg-white px-2.5 py-1 rounded border border-slate-200 shadow-sm text-xs gap-3">
                 {isSyncing ? (
                   <div className="flex items-center gap-1 text-amber-600 font-semibold font-mono text-[9px]">
                     <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
                     <span>SYNCING...</span>
                   </div>
-                ) : user ? (
-                  <div className="flex items-center gap-1.5 text-emerald-600 font-mono text-xs">
-                    {user.photoURL ? (
-                      <img src={user.photoURL} alt="Profile" className="w-4.5 h-4.5 rounded-full border border-emerald-500/30" referrerPolicy="no-referrer" />
-                    ) : (
-                      <div className="w-4.5 h-4.5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[9px] font-bold">
-                        {user.displayName?.[0] || 'U'}
-                      </div>
-                    )}
-                    <span className="text-emerald-700 font-bold text-xs truncate max-w-[80px]">
-                      {user.displayName?.split(' ')[0] || 'CLOUD'}
-                    </span>
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        audioEngine.playClick();
-                        onSignOut();
-                      }}
-                      className="text-[9px] text-slate-500 hover:text-[#f43f5e] uppercase font-bold tracking-widest border border-slate-200 hover:border-[#f43f5e]/30 px-1.5 py-0.5 rounded cursor-pointer leading-none ml-1 transition"
-                    >
-                      OUT
-                    </button>
-                  </div>
                 ) : (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      audioEngine.playClick();
-                      onSignIn();
-                    }}
-                    className="flex items-center gap-1 text-sky-600 hover:text-sky-700 font-bold cursor-pointer text-xs tracking-wider uppercase transition-colors"
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse" />
-                    <span>SYNC</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 text-emerald-600 font-mono text-[10px] font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="truncate max-w-[90px] font-black uppercase">DRVR: {playerName}</span>
+                    </div>
+
+                    {onLogout && (
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          audioEngine.playClick();
+                          onLogout();
+                        }}
+                        className="flex items-center gap-1 text-[8px] text-slate-600 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 px-1.5 py-0.5 rounded font-black cursor-pointer leading-none transition duration-150 uppercase"
+                      >
+                        <LogOut size={9} />
+                        <span>LOGOUT</span>
+                      </button>
+                    )}
+
+                    {onDeleteAccount && (
+                      <button 
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          audioEngine.playClick();
+                          const confirmed = window.confirm("Are you sure? This will delete your records permanently.");
+                          if (confirmed) {
+                            await onDeleteAccount();
+                          }
+                        }}
+                        className="flex items-center gap-1 text-[8px] text-rose-700 hover:bg-rose-100 border border-rose-200 px-1.5 py-0.5 rounded font-black cursor-pointer leading-none transition duration-150 uppercase"
+                      >
+                        <Trash2 size={9} />
+                        <span>DELETE</span>
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             )}
@@ -547,6 +556,7 @@ export default function LevelSelectScreen({
             playerName={playerName}
             levelBestTimes={levelBestTimes}
             onClose={() => setLeaderboardLevelId(null)}
+            onSyncLeaderboards={onSyncLeaderboards}
           />
         )}
       </AnimatePresence>
@@ -562,6 +572,7 @@ export default function LevelSelectScreen({
             overallStanding={overallStanding}
             selectedLeaderboardId={selectedLeaderboardId}
             setSelectedLeaderboardId={setSelectedLeaderboardId}
+            onSyncLeaderboards={onSyncLeaderboards}
           />
         )}
       </AnimatePresence>
@@ -597,13 +608,24 @@ interface LeaderboardModalProps {
   playerName: string;
   levelBestTimes: Record<string, number>;
   onClose: () => void;
+  onSyncLeaderboards?: () => Promise<void>;
 }
 
-function LeaderboardModal({ levelId, playerName, levelBestTimes, onClose }: LeaderboardModalProps) {
+function LeaderboardModal({ levelId, playerName, levelBestTimes, onClose, onSyncLeaderboards }: LeaderboardModalProps) {
   const level = LEVELS.find((l) => l.id === levelId);
   if (!level) return null;
 
+  const [syncCounter, setSyncCounter] = useState(0);
+
   const entries = getLeaderboard(levelId, levelBestTimes, playerName);
+
+  useEffect(() => {
+    if (onSyncLeaderboards) {
+      onSyncLeaderboards().then(() => {
+        setSyncCounter((prev) => prev + 1);
+      });
+    }
+  }, [onSyncLeaderboards]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -730,7 +752,7 @@ function LeaderboardModal({ levelId, playerName, levelBestTimes, onClose }: Lead
 // GLOBAL RANKINGS MODELPORT FOR THE LEVEL
 // ==========================================
 
-interface GlobalRankingsModalProps {
+export interface GlobalRankingsModalProps {
   playerName: string;
   levelBestTimes: Record<string, number>;
   onClose: () => void;
@@ -738,18 +760,36 @@ interface GlobalRankingsModalProps {
   overallStanding: string;
   selectedLeaderboardId: number;
   setSelectedLeaderboardId: (id: number) => void;
+  onSyncLeaderboards?: () => Promise<void>;
 }
 
-function GlobalRankingsModal({
+export function GlobalRankingsModal({
   playerName,
   levelBestTimes,
   onClose,
   medalCounts,
   overallStanding,
   selectedLeaderboardId,
-  setSelectedLeaderboardId
+  setSelectedLeaderboardId,
+  onSyncLeaderboards
 }: GlobalRankingsModalProps) {
+  const [syncCounter, setSyncCounter] = useState(0);
+
   useEffect(() => {
+    if (onSyncLeaderboards) {
+      onSyncLeaderboards().then(() => {
+        setSyncCounter((prev) => prev + 1);
+      });
+    }
+  }, [onSyncLeaderboards]);
+
+  useEffect(() => {
+    // Show the Speed Vault Standings box inside the Rankings modal when opened
+    const element = document.getElementById('speed-vault-standings');
+    if (element) {
+      element.style.display = 'block';
+    }
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose();
@@ -814,7 +854,7 @@ function GlobalRankingsModal({
         </div>
 
         {/* Pilot Standings / Medal Shelf Widget */}
-        <div className="flex flex-col items-center w-full bg-slate-950/60 border border-slate-800 text-white rounded-xl p-2 pb-1.5 shadow-inner">
+        <div id="speed-vault-standings" style={{ display: 'none' }} className="flex flex-col items-center w-full bg-slate-950/60 border border-slate-800 text-white rounded-xl p-2 pb-1.5 shadow-inner">
           <div className="flex items-center justify-between w-full border-b border-slate-800/80 pb-1 mb-1.5 px-0.5">
             <span className="text-[8.5px] text-rose-400 font-black tracking-widest uppercase flex items-center gap-1">
               <Award size={10} className="text-rose-400 fill-rose-500/20" />

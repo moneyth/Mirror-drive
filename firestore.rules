@@ -29,17 +29,18 @@ service cloud.firestore {
     // Validator for UserProgress entity
     function isValidUserProgress(data) {
       return data.userId is string
-        && data.userId == request.auth.uid
+        && data.userId.size() <= 128
+        && data.playerName is string
+        && data.playerName.size() <= 128
         && data.unlockedLevels is list
         && data.levelBestTimes is map
-        && data.settings is map
-        && data.updatedAt == request.time;
+        && data.settings is map;
     }
 
     match /users/{userId} {
-      allow get: if isOwner(userId) && isValidId(userId);
-      allow create: if isOwner(userId) && isValidId(userId) && isValidUserProgress(incoming());
-      allow update: if isOwner(userId) && isValidId(userId) && isValidUserProgress(incoming());
+      allow get, delete: if isValidId(userId);
+      allow list: if true;
+      allow create, update: if isValidId(userId) && isValidUserProgress(request.resource.data);
     }
   }
 }

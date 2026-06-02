@@ -5,7 +5,7 @@
 
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInWithPopup, signOut, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, serverTimestamp, getDocFromServer } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, serverTimestamp, getDocFromServer, collection, getDocs, deleteDoc } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Determine if we have a real, configured Firebase config
@@ -124,9 +124,11 @@ export async function saveProgressToFirebase(
   if (!isFirebaseEnabled || !db) return;
   
   const path = `users/${userId}`;
+  const localName = localStorage.getItem('mirrordrive_player_name') || 'PLAYER';
   try {
     await setDoc(doc(db, 'users', userId), {
       userId,
+      playerName: localName,
       unlockedLevels,
       levelBestTimes,
       settings: {
@@ -153,5 +155,57 @@ export async function loadProgressFromFirebase(userId: string): Promise<any | nu
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, path);
     return null;
+  }
+}
+
+// Loads everyone's progress from Cloud Firestore to build the central leaderboard
+export async function fetchAllScoresFromFirebase(): Promise<any[]> {
+  if (!isFirebaseEnabled || !db) return [];
+  const path = 'users';
+  try {
+    const querySnapshot = await getDocs(collection(db, 'users'));
+    const results: any[] = [];
+    querySnapshot.forEach((doc) => {
+      const data = doc.data();
+      if (data) {
+        results.push(data);
+      }
+    });
+    return results;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+    return [];
+  }
+}
+
+// Checks if a username exists in the collection (case-insensitive)
+export async function checkUsernameInFirestore(username: string): Promise<{ exists: boolean; data?: any } | null> {
+  if (!isFirebaseEnabled || !db) return null;
+  const lower = username.trim().toLowerCase();
+  const path = `users/${lower}`;
+  try {
+    const docSnap = await getDoc(doc(db, 'users', lower));
+    if (docSnap.exists()) {
+      return { exists: true, data: docSnap.data() };
+    }
+    return { exists: false };
+  } catch (error) {
+    // If the error indicates missing doc/permission, handle gracefully as doesn't exist yet
+    if (String(error).includes('permission')) {
+      return { exists: false };
+    }
+    handleFirestoreError(error, OperationType.GET, path);
+    return null;
+  }
+}
+
+// Permanently deletes a user's account and progress from Cloud Firestore
+export async function deleteProgressFromFirebase(userId: string): Promise<void> {
+  if (!isFirebaseEnabled || !db) return;
+  const path = `users/${userId}`;
+  try {
+    await deleteDoc(doc(db, 'users', userId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }

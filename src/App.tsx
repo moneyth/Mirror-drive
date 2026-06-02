@@ -9,7 +9,7 @@ import TitleScreen from './components/TitleScreen';
 import LevelSelectScreen from './components/LevelSelectScreen';
 import GameplayScreen from './components/GameplayScreen';
 import DriverRegistryScreen from './components/DriverRegistryScreen';
-import { auth, isFirebaseEnabled, signInWithGoogle, logOut, saveProgressToFirebase, loadProgressFromFirebase } from './firebase';
+import { auth, isFirebaseEnabled, signInWithGoogle, logOut, saveProgressToFirebase, loadProgressFromFirebase, fetchAllScoresFromFirebase, deleteProgressFromFirebase } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { Smartphone, RotateCw } from 'lucide-react';
 
@@ -26,9 +26,73 @@ export default function App() {
     }
   });
 
+  const [currentUserId, setCurrentUserId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('mirrordrive_user_id') || '';
+    } catch {
+      return '';
+    }
+  });
+
   const handleUpdatePlayerName = (newName: string) => {
     setPlayerName(newName);
     localStorage.setItem('mirrordrive_player_name', newName);
+  };
+
+  const handleLoginSuccess = (
+    name: string,
+    userId: string,
+    unlocked: number[],
+    bestTimes: Record<string, number>
+  ) => {
+    setPlayerName(name);
+    setCurrentUserId(userId);
+    setUnlockedLevels(unlocked);
+    setLevelBestTimes(bestTimes);
+    
+    localStorage.setItem('mirrordrive_player_name', name);
+    localStorage.setItem('mirrordrive_user_id', userId);
+    localStorage.setItem('mirrordrive_unlocked_levels', JSON.stringify(unlocked));
+    
+    // Clear old times
+    for (let i = 1; i <= 30; i++) {
+      localStorage.removeItem(`mirrordrive_best_level_${i}`);
+    }
+    // Store new times
+    for (const key of Object.keys(bestTimes)) {
+      const levelNum = key.replace('level', '');
+      localStorage.setItem(`mirrordrive_best_level_${levelNum}`, bestTimes[key].toString());
+    }
+  };
+
+  const handleLogout = () => {
+    // Clear localStorage
+    localStorage.removeItem('mirrordrive_player_name');
+    localStorage.removeItem('mirrordrive_user_id');
+    localStorage.removeItem('mirrordrive_unlocked_levels');
+    for (let i = 1; i <= 30; i++) {
+      localStorage.removeItem(`mirrordrive_best_level_${i}`);
+    }
+    // Clear state
+    setPlayerName('');
+    setCurrentUserId('');
+    setUnlockedLevels([1]);
+    setLevelBestTimes({});
+    setCurrentScreen(GameState.TITLE);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!currentUserId || !isFirebaseEnabled) {
+      handleLogout();
+      return;
+    }
+    try {
+      await deleteProgressFromFirebase(currentUserId);
+      await syncGlobalLeaderboards();
+    } catch (err) {
+      console.warn("Failed to delete account on Firestore:", err);
+    }
+    handleLogout();
   };
 
   // Unlocked levels registry
@@ -118,88 +182,129 @@ export default function App() {
     }
   }, []);
 
-  // 2. Real-time Firebase Auth and cloud state consensus worker
-  useEffect(() => {
-    if (!isFirebaseEnabled || !auth) return;
+  // Synchronizes and compiles centralized leaderboards from Firestore users data
+  const syncGlobalLeaderboards = async () => {
+    try {
+      const allRivalData = await fetchAllScoresFromFirebase();
+      if (!allRivalData || allRivalData.length === 0) return;
 
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      setUser(firebaseUser);
-      if (firebaseUser) {
-        setIsSyncing(true);
-        try {
-          const remoteData = await loadProgressFromFirebase(firebaseUser.uid);
-          
-          // Read local configurations for consensus merge
-          let localUnlocked = [1];
-          const savedUnlocked = localStorage.getItem('mirrordrive_unlocked_levels');
-          if (savedUnlocked) {
-            const parsed = JSON.parse(savedUnlocked);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              localUnlocked = parsed;
-            }
+      for (let i = 1; i <= 30; i++) {
+        const levelEntries: { playerName: string; completionTime: number; date: string }[] = [];
+        
+        allRivalData.forEach((rival) => {
+          const completionTime = rival.levelBestTimes?.[`level${i}`];
+          if (completionTime && completionTime > 0) {
+            levelEntries.push({
+              playerName: rival.playerName || 'DRVR',
+              completionTime,
+              date: rival.updatedAt ? new Date((rival.updatedAt.seconds || rival.updatedAt._seconds || Date.now()/1000) * 1000).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+            });
           }
+        });
 
-          const localTimes: Record<string, number> = {};
-          for (let i = 1; i <= 30; i++) {
-            const key = `mirrordrive_best_level_${i}`;
-            const recordVal = localStorage.getItem(key);
-            if (recordVal) {
-              localTimes[`level${i}`] = parseFloat(recordVal);
-            }
+        const uniqueEntriesMap = new Map<string, typeof levelEntries[0]>();
+        levelEntries.forEach(entry => {
+          const existing = uniqueEntriesMap.get(entry.playerName);
+          if (!existing || entry.completionTime < existing.completionTime) {
+            uniqueEntriesMap.set(entry.playerName, entry);
           }
+        });
 
-          let mergedUnlocked = [...localUnlocked];
-          let mergedTimes = { ...localTimes };
+        const finalEntries = Array.from(uniqueEntriesMap.values())
+          .sort((a, b) => a.completionTime - b.completionTime)
+          .slice(0, 10);
 
-          const needsCloudReset = localStorage.getItem('mirrordrive_cloud_reset_needed') === 'true';
-
-          if (remoteData && !needsCloudReset) {
-            // Take the Union of all unlocked levels
-            const remoteUnlocked: number[] = remoteData.unlockedLevels || [];
-            mergedUnlocked = Array.from(new Set([...localUnlocked, ...remoteUnlocked])).sort((a, b) => a - b);
-
-            // Take the fastest (minimum) completion times
-            const remoteTimes: Record<string, number> = remoteData.levelBestTimes || {};
-            const allKeys = new Set([...Object.keys(localTimes), ...Object.keys(remoteTimes)]);
-            for (const key of allKeys) {
-              const valLocal = localTimes[key];
-              const valRemote = remoteTimes[key];
-              if (valLocal !== undefined && valRemote !== undefined) {
-                mergedTimes[key] = Math.min(valLocal, valRemote);
-              } else if (valRemote !== undefined) {
-                mergedTimes[key] = valRemote;
-              } else if (valLocal !== undefined) {
-                mergedTimes[key] = valLocal;
-              }
-            }
-          } else if (needsCloudReset) {
-            // Clear cloud reset flag and perform force overwrite with clean local state
-            localStorage.removeItem('mirrordrive_cloud_reset_needed');
-          }
-
-          // Apply consensus values to state
-          setUnlockedLevels(mergedUnlocked);
-          setLevelBestTimes(mergedTimes);
-
-          // Write consensus values to localStorage as offline mirror
-          localStorage.setItem('mirrordrive_unlocked_levels', JSON.stringify(mergedUnlocked));
-          for (const key of Object.keys(mergedTimes)) {
-            const levelNum = key.replace('level', '');
-            localStorage.setItem(`mirrordrive_best_level_${levelNum}`, mergedTimes[key].toString());
-          }
-
-          // Sync verified consensus records back to Firebase
-          await saveProgressToFirebase(firebaseUser.uid, mergedUnlocked, mergedTimes, false);
-        } catch (err) {
-          console.error("Cloud progress consensus synchronization failed:", err);
-        } finally {
-          setIsSyncing(false);
-        }
+        localStorage.setItem(`mirrordrive_leaderboard_level_${i}`, JSON.stringify(finalEntries));
       }
-    });
+    } catch (err) {
+      console.warn("Failed to synchronize global leaderboards:", err);
+    }
+  };
 
-    return () => unsubscribe();
+  useEffect(() => {
+    if (isFirebaseEnabled) {
+      syncGlobalLeaderboards();
+    }
   }, []);
+
+  // 2. Real-time cloud progress synchronizer based on username ID
+  useEffect(() => {
+    if (!isFirebaseEnabled || !currentUserId) return;
+
+    const syncUserProgress = async () => {
+      setIsSyncing(true);
+      try {
+        const remoteData = await loadProgressFromFirebase(currentUserId);
+        
+        let localUnlocked = [1];
+        const savedUnlocked = localStorage.getItem('mirrordrive_unlocked_levels');
+        if (savedUnlocked) {
+          const parsed = JSON.parse(savedUnlocked);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            localUnlocked = parsed;
+          }
+        }
+
+        const localTimes: Record<string, number> = {};
+        for (let i = 1; i <= 30; i++) {
+          const key = `mirrordrive_best_level_${i}`;
+          const recordVal = localStorage.getItem(key);
+          if (recordVal) {
+            localTimes[`level${i}`] = parseFloat(recordVal);
+          }
+        }
+
+        let mergedUnlocked = [...localUnlocked];
+        let mergedTimes = { ...localTimes };
+
+        const needsCloudReset = localStorage.getItem('mirrordrive_cloud_reset_needed') === 'true';
+
+        if (remoteData && !needsCloudReset) {
+          // Take the Union of all unlocked levels
+          const remoteUnlocked: number[] = remoteData.unlockedLevels || [];
+          mergedUnlocked = Array.from(new Set([...localUnlocked, ...remoteUnlocked])).sort((a, b) => a - b);
+
+          // Take the fastest (minimum) completion times
+          const remoteTimes: Record<string, number> = remoteData.levelBestTimes || {};
+          const allKeys = new Set([...Object.keys(localTimes), ...Object.keys(remoteTimes)]);
+          for (const key of allKeys) {
+            const valLocal = localTimes[key];
+            const valRemote = remoteTimes[key];
+            if (valLocal !== undefined && valRemote !== undefined) {
+              mergedTimes[key] = Math.min(valLocal, valRemote);
+            } else if (valRemote !== undefined) {
+              mergedTimes[key] = valRemote;
+            } else if (valLocal !== undefined) {
+              mergedTimes[key] = valLocal;
+            }
+          }
+        } else if (needsCloudReset) {
+          localStorage.removeItem('mirrordrive_cloud_reset_needed');
+        }
+
+        // Apply consensus values to state
+        setUnlockedLevels(mergedUnlocked);
+        setLevelBestTimes(mergedTimes);
+
+        // Write consensus values to localStorage as offline mirror
+        localStorage.setItem('mirrordrive_unlocked_levels', JSON.stringify(mergedUnlocked));
+        for (const key of Object.keys(mergedTimes)) {
+          const levelNum = key.replace('level', '');
+          localStorage.setItem(`mirrordrive_best_level_${levelNum}`, mergedTimes[key].toString());
+        }
+
+        // Sync verified consensus records back to Firebase
+        await saveProgressToFirebase(currentUserId, mergedUnlocked, mergedTimes, false);
+        await syncGlobalLeaderboards();
+      } catch (err) {
+        console.error("Cloud progress consensus synchronization failed:", err);
+      } finally {
+        setIsSyncing(false);
+      }
+    };
+
+    syncUserProgress();
+  }, [currentUserId]);
 
   // Menu control callback handlers
   const handleOpenLevelSelect = () => {
@@ -239,11 +344,20 @@ export default function App() {
     }
 
     // 3. Persist to Firestore instantly if logged in
-    if (user) {
+    if (currentUserId && isFirebaseEnabled) {
       try {
-        await saveProgressToFirebase(user.uid, nextUnlocked, nextTimes, false);
+        await saveProgressToFirebase(currentUserId, nextUnlocked, nextTimes, false);
       } catch (err) {
         console.warn("Cloud write failed during level completion", err);
+      }
+    }
+
+    // Sync global leaderboards reactively
+    if (isFirebaseEnabled) {
+      try {
+        await syncGlobalLeaderboards();
+      } catch (err) {
+        console.warn("Leaderboard sync failed", err);
       }
     }
 
@@ -308,6 +422,7 @@ export default function App() {
             isSyncing={isSyncing}
             playerName={playerName}
             onUpdatePlayerName={handleUpdatePlayerName}
+            onSyncLeaderboards={syncGlobalLeaderboards}
           />
         );
       case GameState.GAMEPLAY:
@@ -336,6 +451,9 @@ export default function App() {
             playerName={playerName}
             onUpdatePlayerName={handleUpdatePlayerName}
             levelBestTimes={levelBestTimes}
+            onSyncLeaderboards={syncGlobalLeaderboards}
+            onLogout={handleLogout}
+            onDeleteAccount={handleDeleteAccount}
           />
         );
     }
@@ -344,7 +462,7 @@ export default function App() {
   if (!playerName) {
     return (
       <DriverRegistryScreen
-        onRegister={handleUpdatePlayerName}
+        onRegister={handleLoginSuccess}
       />
     );
   }

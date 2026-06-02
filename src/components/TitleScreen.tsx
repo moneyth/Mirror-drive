@@ -6,12 +6,13 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { GameMode, Difficulty } from '../types';
 import { drawPixelCar } from './CarRenderer';
-import { Settings, Music, Volume2, Shield, Info, HelpCircle, Trophy, Award } from 'lucide-react';
+import { Settings, Music, Volume2, Shield, Info, HelpCircle, Trophy, Award, LogOut, Trash2, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import audioEngine from './AudioEngine';
 import { User } from 'firebase/auth';
 import { LEVELS } from './Levels';
 import { getLeaderboard } from '../lib/leaderboard';
+import { GlobalRankingsModal } from './LevelSelectScreen';
 
 interface TitleScreenProps {
   onOpenLevelSelect: () => void;
@@ -25,6 +26,9 @@ interface TitleScreenProps {
   playerName: string;
   onUpdatePlayerName: (newName: string) => void;
   levelBestTimes: Record<string, number>;
+  onSyncLeaderboards?: () => Promise<void>;
+  onLogout?: () => void;
+  onDeleteAccount?: () => Promise<void>;
 }
 
 export default function TitleScreen({ 
@@ -38,11 +42,58 @@ export default function TitleScreen({
   isSyncing,
   playerName,
   onUpdatePlayerName,
-  levelBestTimes
+  levelBestTimes,
+  onSyncLeaderboards,
+  onLogout,
+  onDeleteAccount
 }: TitleScreenProps) {
-   const [selectedIdx, setSelectedIdx] = useState(0); // 0: START, 1: SETTINGS, 2: MANUAL
+  const [selectedIdx, setSelectedIdx] = useState(0); // 0: START, 1: SETTINGS, 2: LEADERBOARD, 3: MANUAL
   const [showOptions, setShowOptions] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [selectedLeaderboardId, setSelectedLeaderboardId] = useState<number>(1);
+
+  const medalCounts = useMemo(() => {
+    let gold = 0;
+    let silver = 0;
+    let bronze = 0;
+
+    LEVELS.forEach((lvl) => {
+      const finalEntries = getLeaderboard(lvl.id, levelBestTimes, playerName);
+      const playerIndex = finalEntries.findIndex((e) => e.isPlayer);
+      if (playerIndex === 0) {
+        gold++;
+      } else if (playerIndex === 1) {
+        silver++;
+      } else if (playerIndex === 2) {
+        bronze++;
+      }
+    });
+
+    return { gold, silver, bronze };
+  }, [levelBestTimes, playerName]);
+
+  const overallStanding = useMemo(() => {
+    let sumRank = 0;
+    let count = 0;
+    LEVELS.forEach((lvl) => {
+      const bestTime = levelBestTimes[`level${lvl.id}`];
+      if (bestTime) {
+        const finalEntries = getLeaderboard(lvl.id, levelBestTimes, playerName);
+        const playerIndex = finalEntries.findIndex((e) => e.isPlayer);
+        if (playerIndex !== -1) {
+          sumRank += (playerIndex + 1);
+          count++;
+        }
+      }
+    });
+    if (count === 0) return 'UNRANKED';
+    const avg = Math.round(sumRank / count);
+    if (avg === 1) return '1ST';
+    if (avg === 2) return '2ND';
+    if (avg === 3) return '3RD';
+    return `${avg}TH`;
+  }, [levelBestTimes, playerName]);
   
   // Settings state
   const [musicOn, setMusicOn] = useState(true);
@@ -54,6 +105,7 @@ export default function TitleScreen({
   const [scaleFactor, setScaleFactor] = useState(1);
 
   const [editingName, setEditingName] = useState(playerName);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     setEditingName(playerName);
@@ -76,14 +128,14 @@ export default function TitleScreen({
   // Keyboard navigation on title screen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (showOptions || showInfo) return;
+      if (showOptions || showInfo || showLeaderboard) return;
       
       if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
         audioEngine.playClick();
-        setSelectedIdx((prev) => (prev > 0 ? prev - 1 : 2));
+        setSelectedIdx((prev) => (prev > 0 ? prev - 1 : 3));
       } else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') {
         audioEngine.playClick();
-        setSelectedIdx((prev) => (prev < 2 ? prev + 1 : 0));
+        setSelectedIdx((prev) => (prev < 3 ? prev + 1 : 0));
       } else if (e.key === 'Enter' || e.key === ' ') {
         audioEngine.playClick();
         triggerMenuAction();
@@ -92,7 +144,7 @@ export default function TitleScreen({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIdx, showOptions, showInfo]);
+  }, [selectedIdx, showOptions, showInfo, showLeaderboard]);
 
   const triggerMenuAction = () => {
     if (selectedIdx === 0) {
@@ -100,6 +152,8 @@ export default function TitleScreen({
     } else if (selectedIdx === 1) {
       setShowOptions(true);
     } else if (selectedIdx === 2) {
+      setShowLeaderboard(true);
+    } else if (selectedIdx === 3) {
       setShowInfo(true);
     }
   };
@@ -450,7 +504,7 @@ export default function TitleScreen({
           </button>
 
           {/* LOWER ICON PANEL */}
-          <div className="grid grid-cols-2 gap-2 w-full">
+          <div className="grid grid-cols-3 gap-2 w-full">
             {/* SETTINGS ICON */}
             <button
               onClick={() => {
@@ -468,15 +522,32 @@ export default function TitleScreen({
               <span className="text-[8px] font-black uppercase tracking-wider mt-1">SETTINGS</span>
             </button>
 
+            {/* RANKINGS LEADERBOARD ICON */}
+            <button
+              onClick={() => {
+                audioEngine.playClick();
+                setShowLeaderboard(true);
+              }}
+              onMouseEnter={() => setSelectedIdx(2)}
+              className={`flex flex-col items-center justify-center py-1.5 rounded border font-sans cursor-pointer transition-all duration-150 active:scale-95 group ${
+                selectedIdx === 2
+                  ? 'bg-rose-50 border-2 border-rose-500 text-rose-600 ring-1 ring-rose-400'
+                  : 'bg-slate-55 border-slate-200 bg-slate-100 hover:bg-rose-50 hover:border-rose-400 hover:text-rose-650 text-slate-700'
+              }`}
+            >
+              <Trophy size={15} className="group-hover:scale-110 transition-transform text-slate-650 fill-none group-hover:fill-rose-200" />
+              <span className="text-[8px] font-black uppercase tracking-wider mt-1">RANKINGS</span>
+            </button>
+
             {/* MANUAL ICON */}
             <button
               onClick={() => {
                 audioEngine.playClick();
                 setShowInfo(true);
               }}
-              onMouseEnter={() => setSelectedIdx(2)}
+              onMouseEnter={() => setSelectedIdx(3)}
               className={`flex flex-col items-center justify-center py-1.5 rounded border font-sans cursor-pointer transition-all duration-150 active:scale-95 group ${
-                selectedIdx === 2
+                selectedIdx === 3
                   ? 'bg-rose-50 border-2 border-rose-500 text-rose-600 ring-1 ring-rose-400'
                   : 'bg-slate-55 border-slate-200 bg-slate-100 hover:bg-rose-50 hover:border-rose-400 hover:text-rose-650 text-slate-700'
               }`}
@@ -608,27 +679,78 @@ export default function TitleScreen({
               />
             </div>
 
+            {/* PROFILE ACTIONS */}
+            <div className="flex flex-col gap-1.5 pt-1.5 border-t border-slate-200">
+              <span className="font-sans text-[10px] text-slate-700 uppercase font-bold text-left">
+                PROFILE ACTIONS
+              </span>
+              <div className="grid grid-cols-2 gap-2 mt-0.5">
+                {/* LOGOUT BUTTON */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    audioEngine.playClick();
+                    if (onLogout) {
+                      onLogout();
+                    }
+                  }}
+                  className="flex items-center justify-center gap-1.5 py-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded text-[9px] font-sans font-bold uppercase transition-all tracking-wider cursor-pointer active:scale-95"
+                >
+                  <LogOut size={11} />
+                  <span>Logout</span>
+                </button>
+
+                {/* DELETE ACCOUNT BUTTON */}
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={async () => {
+                    audioEngine.playClick();
+                    const confirmed = window.confirm("Are you sure? This cannot be undone.");
+                    if (confirmed) {
+                      setIsDeleting(true);
+                      try {
+                        if (onDeleteAccount) {
+                          await onDeleteAccount();
+                        }
+                      } finally {
+                        setIsDeleting(false);
+                      }
+                    }
+                  }}
+                  className="flex items-center justify-center gap-1.5 py-1 px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded text-[9px] font-sans font-bold uppercase transition-all tracking-wider disabled:opacity-50 cursor-pointer active:scale-95"
+                >
+                  {isDeleting ? (
+                    <Loader2 size={11} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={11} />
+                  )}
+                  <span>Delete Account</span>
+                </button>
+              </div>
+            </div>
+
             <button
-              onClick={() => {
-                audioEngine.playClick();
-                audioEngine.playMusic();
-                
-                const trimmed = editingName.trim().toUpperCase();
-                if (trimmed.length >= 2 && trimmed.length <= 12) {
-                  onUpdatePlayerName(trimmed);
-                }
-                
-                setShowOptions(false);
-              }}
-              disabled={editingName.trim().length < 2}
-              className={`mt-3 py-2 text-white font-sans font-bold text-[10px] uppercase tracking-widest rounded-lg cursor-pointer text-center shadow-md transition-all duration-150 border-2 ${
-                editingName.trim().length >= 2
-                  ? 'bg-rose-500 hover:bg-rose-450 border-rose-600 active:scale-95'
-                  : 'bg-slate-300 text-slate-500 border-slate-350 cursor-not-allowed opacity-60'
-              }`}
-            >
-              APPLY SETTINGS
-            </button>
+               onClick={() => {
+                 audioEngine.playClick();
+                 audioEngine.playMusic();
+                 
+                 const trimmed = editingName.trim().toUpperCase();
+                 if (trimmed.length >= 2 && trimmed.length <= 12) {
+                   onUpdatePlayerName(trimmed);
+                 }
+                 
+                 setShowOptions(false);
+               }}
+               disabled={editingName.trim().length < 2 || isDeleting}
+               className={`mt-3 py-2 text-white font-sans font-bold text-[10px] uppercase tracking-widest rounded-lg cursor-pointer text-center shadow-md transition-all duration-150 border-2 ${
+                 editingName.trim().length >= 2 && !isDeleting
+                   ? 'bg-rose-500 hover:bg-rose-450 border-rose-600 active:scale-95'
+                   : 'bg-slate-300 text-slate-500 border-slate-350 cursor-not-allowed opacity-60'
+               }`}
+             >
+               APPLY SETTINGS
+             </button>
           </div>
         </div>
       )}
@@ -698,6 +820,22 @@ export default function TitleScreen({
           </div>
         </div>
       )}
+
+      {/* 3. LEADERBOARD OVERLAY */}
+      <AnimatePresence>
+        {showLeaderboard && (
+          <GlobalRankingsModal
+            playerName={playerName}
+            levelBestTimes={levelBestTimes}
+            onClose={() => setShowLeaderboard(false)}
+            medalCounts={medalCounts}
+            overallStanding={overallStanding}
+            selectedLeaderboardId={selectedLeaderboardId}
+            setSelectedLeaderboardId={setSelectedLeaderboardId}
+            onSyncLeaderboards={onSyncLeaderboards}
+          />
+        )}
+      </AnimatePresence>
 
       </div>
     </div>
