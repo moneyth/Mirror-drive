@@ -99,7 +99,7 @@ export default function DriverRegistryScreen({ onRegister }: DriverRegistryScree
           const lowerId = uppercaseName.toLowerCase();
           
           // Save initially to Firebase
-          await saveProgressToFirebase(lowerId, defaultUnlocked, defaultTimes, false);
+          await saveProgressToFirebase(lowerId, defaultUnlocked, defaultTimes, false, uppercaseName);
           
           setTimeout(() => {
             onRegister(uppercaseName, lowerId, defaultUnlocked, defaultTimes);

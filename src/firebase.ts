@@ -119,12 +119,13 @@ export async function saveProgressToFirebase(
   userId: string,
   unlockedLevels: number[],
   levelBestTimes: Record<string, number>,
-  audioMuted: boolean
+  audioMuted: boolean,
+  playerName?: string
 ): Promise<void> {
   if (!isFirebaseEnabled || !db) return;
   
   const path = `users/${userId}`;
-  const localName = localStorage.getItem('mirrordrive_player_name') || 'PLAYER';
+  const localName = playerName || localStorage.getItem('mirrordrive_player_name') || 'PLAYER';
   try {
     await setDoc(doc(db, 'users', userId), {
       userId,

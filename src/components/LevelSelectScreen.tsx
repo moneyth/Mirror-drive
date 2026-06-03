@@ -789,7 +789,7 @@ export function GlobalRankingsModal({
     fetchAllScoresFromFirebase().then((data) => {
       setGlobalEntries(data || []);
     });
-  }, []);
+  }, [syncCounter]);
 
   return (
     <motion.div
