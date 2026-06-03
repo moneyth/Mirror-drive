@@ -423,6 +423,8 @@ export default function App() {
             playerName={playerName}
             onUpdatePlayerName={handleUpdatePlayerName}
             onSyncLeaderboards={syncGlobalLeaderboards}
+            onLogout={handleLogout}
+            onDeleteAccount={handleDeleteAccount}
           />
         );
       case GameState.GAMEPLAY:

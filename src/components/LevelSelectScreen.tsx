@@ -10,6 +10,7 @@ import audioEngine from './AudioEngine';
 import { User } from 'firebase/auth';
 import { motion, AnimatePresence } from 'motion/react';
 import { getLeaderboard } from '../lib/leaderboard';
+import { fetchAllScoresFromFirebase, isFirebaseEnabled } from '../firebase';
 
 interface LevelSelectScreenProps {
   unlockedLevels: number[];
@@ -774,6 +775,7 @@ export function GlobalRankingsModal({
   onSyncLeaderboards
 }: GlobalRankingsModalProps) {
   const [syncCounter, setSyncCounter] = useState(0);
+  const [globalEntries, setGlobalEntries] = useState<any[]>([]);
 
   useEffect(() => {
     if (onSyncLeaderboards) {
@@ -784,20 +786,10 @@ export function GlobalRankingsModal({
   }, [onSyncLeaderboards]);
 
   useEffect(() => {
-    // Show the Speed Vault Standings box inside the Rankings modal when opened
-    const element = document.getElementById('speed-vault-standings');
-    if (element) {
-      element.style.display = 'block';
-    }
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+    fetchAllScoresFromFirebase().then((data) => {
+      setGlobalEntries(data || []);
+    });
+  }, []);
 
   return (
     <motion.div
@@ -854,7 +846,7 @@ export function GlobalRankingsModal({
         </div>
 
         {/* Pilot Standings / Medal Shelf Widget */}
-        <div id="speed-vault-standings" style={{ display: 'none' }} className="flex flex-col items-center w-full bg-slate-950/60 border border-slate-800 text-white rounded-xl p-2 pb-1.5 shadow-inner">
+        <div id="speed-vault-standings" className="flex flex-col items-center w-full bg-slate-950/60 border border-slate-800 text-white rounded-xl p-2 pb-1.5 shadow-inner">
           <div className="flex items-center justify-between w-full border-b border-slate-800/80 pb-1 mb-1.5 px-0.5">
             <span className="text-[8.5px] text-rose-400 font-black tracking-widest uppercase flex items-center gap-1">
               <Award size={10} className="text-rose-400 fill-rose-500/20" />
@@ -924,7 +916,81 @@ export function GlobalRankingsModal({
         {(() => {
           const currentLvl = LEVELS.find(l => l.id === selectedLeaderboardId);
           if (!currentLvl) return null;
-          const entries = getLeaderboard(selectedLeaderboardId, levelBestTimes, playerName);
+          
+          let entries;
+          if (isFirebaseEnabled && globalEntries && globalEntries.length > 0) {
+            const list: any[] = [];
+            let playerFoundInGlobal = false;
+
+            globalEntries.forEach((user: any) => {
+              const bestTime = user.levelBestTimes?.[`level${selectedLeaderboardId}`];
+              if (bestTime && bestTime > 0) {
+                let entryDate = '';
+                if (user.updatedAt) {
+                  try {
+                    if (typeof user.updatedAt.toDate === 'function') {
+                      entryDate = user.updatedAt.toDate().toISOString().split('T')[0];
+                    } else if (user.updatedAt.seconds) {
+                      entryDate = new Date(user.updatedAt.seconds * 1000).toISOString().split('T')[0];
+                    } else if (typeof user.updatedAt === 'string' || typeof user.updatedAt === 'number') {
+                      entryDate = new Date(user.updatedAt).toISOString().split('T')[0];
+                    }
+                  } catch (e) {
+                    entryDate = new Date().toISOString().split('T')[0];
+                  }
+                }
+                if (!entryDate) {
+                  entryDate = new Date().toISOString().split('T')[0];
+                }
+
+                const isCurrentPlayer = user.playerName === playerName;
+                if (isCurrentPlayer) {
+                  playerFoundInGlobal = true;
+                }
+
+                list.push({
+                  playerName: user.playerName || 'DRVR',
+                  completionTime: bestTime,
+                  date: entryDate,
+                  isPlayer: isCurrentPlayer,
+                });
+              }
+            });
+
+            // Fallback: merge current player's local best time if not present or is better
+            const localBest = levelBestTimes?.[`level${selectedLeaderboardId}`];
+            if (localBest && localBest > 0) {
+              if (playerFoundInGlobal) {
+                const idx = list.findIndex(e => e.isPlayer);
+                if (idx !== -1 && localBest < list[idx].completionTime) {
+                  list[idx].completionTime = localBest;
+                  list[idx].date = new Date().toISOString().split('T')[0];
+                }
+              } else {
+                list.push({
+                  playerName: playerName || 'DRVR',
+                  completionTime: localBest,
+                  date: new Date().toISOString().split('T')[0],
+                  isPlayer: true,
+                });
+              }
+            }
+
+            // Deduplicate by playerName, keeping fastest run
+            const uniqMap = new Map<string, any>();
+            list.forEach((entry) => {
+              const existing = uniqMap.get(entry.playerName);
+              if (!existing || entry.completionTime < existing.completionTime) {
+                uniqMap.set(entry.playerName, entry);
+              }
+            });
+
+            const dedupedList = Array.from(uniqMap.values());
+            dedupedList.sort((a, b) => a.completionTime - b.completionTime);
+            entries = dedupedList.slice(0, 10);
+          } else {
+            entries = getLeaderboard(selectedLeaderboardId, levelBestTimes, playerName);
+          }
 
           return (
             <>
