@@ -629,9 +629,14 @@ function LeaderboardModal({ levelId, playerName, levelBestTimes, onClose, onSync
 
   useEffect(() => {
     if (isFirebaseEnabled) {
-      fetchAllScoresFromFirebase().then((data) => {
-        setGlobalEntries(data || []);
-      });
+      fetchAllScoresFromFirebase()
+        .then((data) => {
+          setGlobalEntries(data || []);
+        })
+        .catch((err) => {
+          console.warn("Failed to fetch all scores from Firebase for individual modal:", err);
+          setGlobalEntries([]);
+        });
     }
   }, [syncCounter, isFirebaseEnabled]);
 
@@ -868,9 +873,14 @@ export function GlobalRankingsModal({
   }, [onSyncLeaderboards]);
 
   useEffect(() => {
-    fetchAllScoresFromFirebase().then((data) => {
-      setGlobalEntries(data || []);
-    });
+    fetchAllScoresFromFirebase()
+      .then((data) => {
+        setGlobalEntries(data || []);
+      })
+      .catch((err) => {
+        console.warn("Failed to fetch all scores from Firebase for global rankings:", err);
+        setGlobalEntries([]);
+      });
   }, [syncCounter]);
 
   return (

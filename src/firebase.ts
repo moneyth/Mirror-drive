@@ -29,7 +29,7 @@ if (isFirebaseEnabled) {
     // Validate Connection to Firestore and warn if client is offline or config is mismatching
     const testConnection = async () => {
       try {
-        await getDocFromServer(doc(db, 'test', 'connection'));
+        await getDocFromServer(doc(db, 'users', 'test-connection'));
       } catch (error) {
         if (error instanceof Error && error.message.includes('the client is offline')) {
           console.error("Please check your Firebase configuration.");
