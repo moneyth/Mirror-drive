@@ -617,8 +617,7 @@ function LeaderboardModal({ levelId, playerName, levelBestTimes, onClose, onSync
   if (!level) return null;
 
   const [syncCounter, setSyncCounter] = useState(0);
-
-  const entries = getLeaderboard(levelId, levelBestTimes, playerName);
+  const [globalEntries, setGlobalEntries] = useState<any[]>([]);
 
   useEffect(() => {
     if (onSyncLeaderboards) {
@@ -627,6 +626,89 @@ function LeaderboardModal({ levelId, playerName, levelBestTimes, onClose, onSync
       });
     }
   }, [onSyncLeaderboards]);
+
+  useEffect(() => {
+    if (isFirebaseEnabled) {
+      fetchAllScoresFromFirebase().then((data) => {
+        setGlobalEntries(data || []);
+      });
+    }
+  }, [syncCounter, isFirebaseEnabled]);
+
+  let entries: any[] = [];
+  if (isFirebaseEnabled && globalEntries && globalEntries.length > 0) {
+    const list: any[] = [];
+    let playerFoundInGlobal = false;
+
+    globalEntries.forEach((user: any) => {
+      const bestTime = user.levelBestTimes?.[`level${levelId}`];
+      if (bestTime && bestTime > 0) {
+        let entryDate = '';
+        if (user.updatedAt) {
+          try {
+            if (typeof user.updatedAt.toDate === 'function') {
+              entryDate = user.updatedAt.toDate().toISOString().split('T')[0];
+            } else if (user.updatedAt.seconds) {
+              entryDate = new Date(user.updatedAt.seconds * 1000).toISOString().split('T')[0];
+            } else if (typeof user.updatedAt === 'string' || typeof user.updatedAt === 'number') {
+              entryDate = new Date(user.updatedAt).toISOString().split('T')[0];
+            }
+          } catch (e) {
+            entryDate = new Date().toISOString().split('T')[0];
+          }
+        }
+        if (!entryDate) {
+          entryDate = new Date().toISOString().split('T')[0];
+        }
+
+        const isCurrentPlayer = user.playerName === playerName;
+        if (isCurrentPlayer) {
+          playerFoundInGlobal = true;
+        }
+
+        list.push({
+          playerName: user.playerName || 'DRVR',
+          completionTime: bestTime,
+          date: entryDate,
+          isPlayer: isCurrentPlayer,
+        });
+      }
+    });
+
+    // Fallback: merge current player's local best time if not present or is better
+    const localBest = levelBestTimes?.[`level${levelId}`];
+    if (localBest && localBest > 0) {
+      if (playerFoundInGlobal) {
+        const idx = list.findIndex(e => e.isPlayer);
+        if (idx !== -1 && localBest < list[idx].completionTime) {
+          list[idx].completionTime = localBest;
+          list[idx].date = new Date().toISOString().split('T')[0];
+        }
+      } else {
+        list.push({
+          playerName: playerName || 'DRVR',
+          completionTime: localBest,
+          date: new Date().toISOString().split('T')[0],
+          isPlayer: true,
+        });
+      }
+    }
+
+    // Deduplicate by playerName, keeping fastest run
+    const uniqMap = new Map<string, any>();
+    list.forEach((entry) => {
+      const existing = uniqMap.get(entry.playerName);
+      if (!existing || entry.completionTime < existing.completionTime) {
+        uniqMap.set(entry.playerName, entry);
+      }
+    });
+
+    const dedupedList = Array.from(uniqMap.values());
+    dedupedList.sort((a, b) => a.completionTime - b.completionTime);
+    entries = dedupedList.slice(0, 10);
+  } else {
+    entries = getLeaderboard(levelId, levelBestTimes, playerName);
+  }
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

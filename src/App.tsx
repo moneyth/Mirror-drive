@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { GameState, Difficulty } from './types';
 import TitleScreen from './components/TitleScreen';
 import LevelSelectScreen from './components/LevelSelectScreen';
@@ -183,7 +183,7 @@ export default function App() {
   }, []);
 
   // Synchronizes and compiles centralized leaderboards from Firestore users data
-  const syncGlobalLeaderboards = async () => {
+  const syncGlobalLeaderboards = useCallback(async () => {
     try {
       const allRivalData = await fetchAllScoresFromFirebase();
       if (!allRivalData || allRivalData.length === 0) return;
@@ -194,10 +194,28 @@ export default function App() {
         allRivalData.forEach((rival) => {
           const completionTime = rival.levelBestTimes?.[`level${i}`];
           if (completionTime && completionTime > 0) {
+            let entryDate = '';
+            if (rival.updatedAt) {
+              try {
+                if (typeof rival.updatedAt.toDate === 'function') {
+                  entryDate = rival.updatedAt.toDate().toISOString().split('T')[0];
+                } else if (rival.updatedAt.seconds) {
+                  entryDate = new Date(rival.updatedAt.seconds * 1000).toISOString().split('T')[0];
+                } else if (typeof rival.updatedAt === 'string' || typeof rival.updatedAt === 'number') {
+                  entryDate = new Date(rival.updatedAt).toISOString().split('T')[0];
+                }
+              } catch (e) {
+                entryDate = new Date().toISOString().split('T')[0];
+              }
+            }
+            if (!entryDate) {
+              entryDate = new Date().toISOString().split('T')[0];
+            }
+
             levelEntries.push({
               playerName: rival.playerName || 'DRVR',
               completionTime,
-              date: rival.updatedAt ? new Date((rival.updatedAt.seconds || rival.updatedAt._seconds || Date.now()/1000) * 1000).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+              date: entryDate,
             });
           }
         });
@@ -219,7 +237,7 @@ export default function App() {
     } catch (err) {
       console.warn("Failed to synchronize global leaderboards:", err);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (isFirebaseEnabled) {

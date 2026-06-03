@@ -1,46 +1,8 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Default deny catch-all
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.\\ ]+$');
-    }
-
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function incoming() {
-      return request.resource.data;
-    }
-
-    function existing() {
-      return resource.data;
-    }
-
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
-    }
-
-    // Validator for UserProgress entity
-    function isValidUserProgress(data) {
-      return data.userId is string
-        && data.userId.size() <= 128
-        && data.playerName is string
-        && data.playerName.size() <= 128
-        && data.unlockedLevels is list
-        && data.levelBestTimes is map
-        && data.settings is map;
-    }
-
     match /users/{userId} {
-      allow get, delete: if isValidId(userId);
-      allow list: if true;
-      allow create, update: if isValidId(userId) && isValidUserProgress(request.resource.data);
+      allow read, write: if true;
     }
   }
 }
